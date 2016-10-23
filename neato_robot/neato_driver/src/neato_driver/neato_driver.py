@@ -36,7 +36,6 @@ ROS Bindings can be found in the neato_node package.
 
 __author__ = "ferguson@cs.albany.edu (Michael Ferguson)"
 
-import serial
 import socket
 import time
 import select
@@ -386,8 +385,6 @@ class xv11():
             except Exception as inst:
                 pass
         self.flush_socket()
-
-#        print self.state
         return [self.state["LeftWheel_PositionInMM"],self.state["RightWheel_PositionInMM"],self.state["LeftWheel_Speed"],self.state["RightWheel_Speed"]]
 
     def getAnalogSensors(self):
