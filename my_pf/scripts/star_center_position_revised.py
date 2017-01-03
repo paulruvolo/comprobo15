@@ -137,6 +137,7 @@ class MarkerProcessor(object):
     def config_callback(self, config, level):
         self.phase_offset = config.phase_offset
         self.pose_correction = config.pose_correction
+        self.publish_star_odom_transform = config.publish_star_odom_transform
         return config
 
     def process_odom(self, msg):
@@ -181,7 +182,8 @@ class MarkerProcessor(object):
                 pose_stamped = PoseStamped(header=Header(stamp=msg.header.stamp,frame_id="STAR"),pose=pose)
                 # TODO: use frame timestamp instead of now()
                 self.star_pose_pub.publish(pose_stamped)
-                self.fix_STAR_to_odom_transform(pose_stamped)
+                if self.publish_star_odom_transform:
+                    self.fix_STAR_to_odom_transform(pose_stamped)
 
     def fix_STAR_to_odom_transform(self, msg):
         """ Super tricky code to properly update map to odom transform... do not modify this... Difficulty level infinity. """

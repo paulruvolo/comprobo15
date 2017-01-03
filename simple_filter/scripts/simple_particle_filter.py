@@ -96,7 +96,7 @@ class SimpleParticleFilter(object):
 
     def run(self):
         """ main run loop """
-        r = rospy.Rate(5)
+        r = rospy.Rate(1)
         while not rospy.is_shutdown():
             if self.last_scan != None:
                 self.pf.integrate_observation(self.last_scan)
@@ -163,14 +163,14 @@ class SensorModel(object):
             return 1.0
 
         closest = self.world_model.get_closest_wall(position, direction)
-        if closest == None and observation == 0.0:
+        if closest == None:
             # probability of a false positive is 0
-            return 1.0
+            if observation == 0.0:
+                return 1.0
+            else:
+                return 0.0
         elif closest != None and observation == 0.0:
             # probability of missing an obstacle is 0
-            return 0.0
-        elif closest == None and observation != 0.0:
-            #probability of  false positive is 0
             return 0.0
         return norm(0, self.model_noise_rate).pdf(abs(position - closest) - observation)
 

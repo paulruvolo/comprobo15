@@ -7,7 +7,7 @@
 
 import rospy
 from ar_pose.msg import ARMarkers
-from tf.transformations import euler_from_quaternion, rotation_matrix, quaternion_from_matrix, quaternion_from_euler
+from tf.transformations import euler_matrix, euler_from_quaternion, rotation_matrix, quaternion_from_matrix, quaternion_from_euler
 import numpy as np
 from nav_msgs.msg import Odometry
 from geometry_msgs.msg import PoseStamped, Pose, Point, Quaternion
@@ -83,15 +83,21 @@ class MarkerLocator(object):
 
     def get_camera_position(self, marker):
         """ Outputs the position of the camera in the global coordinates """
+        #TODO: use this instead!! (self.translation, self.rotation) = TransformHelpers.convert_pose_inverse_transform(marker.pose)
+
         euler_angles = euler_from_quaternion((marker.pose.pose.orientation.x,
                                               marker.pose.pose.orientation.y,
                                               marker.pose.pose.orientation.z,
                                               marker.pose.pose.orientation.w))
+        print euler_angles
         translation = np.array([marker.pose.pose.position.y,
                                 -marker.pose.pose.position.x,
-                                0,
+                                0.0,
                                 1.0])
-        translation_rotated = rotation_matrix(self.yaw-euler_angles[2], [0,0,1]).dot(translation)
+        rot_mat = rotation_matrix(self.yaw-euler_angles[2], [0,0,1])
+        #rot_mat = euler_matrix(euler_angles[0], euler_angles[1], self.yaw+euler_angles[2])
+        translation_rotated = rot_mat.dot(translation)
+        print translation_rotated
         xy_yaw = (translation_rotated[0]+self.position[0],translation_rotated[1]+self.position[1],self.yaw-euler_angles[2])
         return xy_yaw
 
@@ -144,30 +150,23 @@ class MarkerProcessor(object):
             angle_diffs = TransformHelpers.angle_diff(euler_angles[0],pi), TransformHelpers.angle_diff(euler_angles[1],0)
             print angle_diffs, marker.pose.pose.position.z
             if (marker.id in self.marker_locators and
-                3.2 <= marker.pose.pose.position.z <= 3.6 and
+                3.0 <= marker.pose.pose.position.z <= 3.6 and
                 fabs(angle_diffs[0]) <= .4 and
                 fabs(angle_diffs[1]) <= .4):
                 print "FOUND IT!"
                 locator = self.marker_locators[marker.id]
                 xy_yaw = list(locator.get_camera_position(marker))
-                xy_yaw[0] += self.pose_correction*cos(xy_yaw[2])
-                xy_yaw[1] += self.pose_correction*sin(xy_yaw[2])
+                print self.pose_correction
+                xy_yaw[0] += self.pose_correction*cos(xy_yaw[2]-pi/2)
+                xy_yaw[1] += self.pose_correction*sin(xy_yaw[2]-pi/2)
                 orientation_tuple = quaternion_from_euler(0,0,xy_yaw[2])
                 pose = Pose(position=Point(x=-xy_yaw[0],y=-xy_yaw[1],z=0),
                             orientation=Quaternion(x=orientation_tuple[0], y=orientation_tuple[1], z=orientation_tuple[2], w=orientation_tuple[3]))
                 # TODO: use markers timestamp instead of now() (unfortunately, not populated currently by ar_pose)
-                pose_stamped = PoseStamped(header=Header(stamp=rospy.Time.now(),frame_id="STAR"),pose=pose)
-                try:
-                    offset, quaternion = self.tf_listener.lookupTransform("/base_link", "/base_laser_link", rospy.Time(0))
-                except Exception as inst:
-                    print "Error", inst
-                    return
+                pose_stamped = PoseStamped(header=Header(stamp=msg.header.stamp,frame_id="STAR"),pose=pose)
                 # TODO: use frame timestamp instead of now()
-                pose_stamped_corrected = deepcopy(pose_stamped)
-                pose_stamped_corrected.pose.position.x -= offset[0]*cos(xy_yaw[2])
-                pose_stamped_corrected.pose.position.y -= offset[0]*sin(xy_yaw[2])
-                self.star_pose_pub.publish(pose_stamped_corrected)
-                self.fix_STAR_to_odom_transform(pose_stamped_corrected)
+                self.star_pose_pub.publish(pose_stamped)
+                self.fix_STAR_to_odom_transform(pose_stamped)
 
     def fix_STAR_to_odom_transform(self, msg):
         """ Super tricky code to properly update map to odom transform... do not modify this... Difficulty level infinity. """

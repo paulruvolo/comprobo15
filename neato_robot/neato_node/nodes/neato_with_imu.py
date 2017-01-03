@@ -1,14 +1,5 @@
 #!/usr/bin/env python
 
-# 
-#
-# A modification to the Neato ROS bridge developed by Michael Ferguson
-# Changes:
-#   (1) Support for connecting over a socket
-#   (2) Flipped the laser coordinate frame around to adhere to ROS conventions
-#       (enables use of gmapping)
-#   (3) Expose more sensors on the robot (including bump sensor)
-
 # ROS node for the Neato Robot Vacuum
 # Copyright (c) 2010 University at Albany. All right reserved.
 #
@@ -38,8 +29,7 @@
 ROS node for Neato XV-11 Robot Vacuum.
 """
 
-__author__ = "Paul.Ruvolo@olin.edu (Paul Ruvolo)"
-# NOTE: heavily based on Michael Ferguson's original work
+__author__ = "ferguson@cs.albany.edu (Michael Ferguson)"
 
 import time
 import roslib; roslib.load_manifest("neato_node")
@@ -54,20 +44,20 @@ from nav_msgs.msg import Odometry
 from neato_node.msg import Bump
 from tf.broadcaster import TransformBroadcaster
 
-import numpy as np
-
 from neato_driver.neato_driver import xv11, BASE_WIDTH, MAX_SPEED
 
-class NeatoNode(object):
+class NeatoNode:
 
     def __init__(self):
         """ Start up connection to the Neato Robot. """
         rospy.init_node('neato')
 
-        host = rospy.get_param('~host')
-        rospy.loginfo("Connecting to host: %s"%(host))
+        self.port = rospy.get_param('~port', "/dev/ttyUSB0")
+        rospy.loginfo("Using port: %s"%(self.port))
 
-        self.robot = xv11(host)
+        self.robot = xv11(self.port)
+
+        rospy.Subscriber("pi_cmd",String,self.pi_command)
 
         rospy.Subscriber("cmd_vel", Twist, self.cmdVelCb)
         self.scanPub = rospy.Publisher('scan', LaserScan, queue_size=10)
@@ -75,7 +65,12 @@ class NeatoNode(object):
         self.bumpPub = rospy.Publisher('bump',Bump, queue_size=10)
         self.odomBroadcaster = TransformBroadcaster()
 
+        self.cmd_to_send = None
+
         self.cmd_vel = [0,0]
+
+    def pi_command(self,msg):
+        self.cmd_to_send = msg
 
     def spin(self):        
         encoders = [0,0]
@@ -83,6 +78,7 @@ class NeatoNode(object):
         self.x = 0                  # position in xy plane
         self.y = 0
         self.th = 0
+        # NEED to reorder the laser scans and flip the laser around... this will not be intuitive for students!!
 
         # things that don't ever change
         scan_link = rospy.get_param('~frame_id','base_laser_link')
@@ -98,12 +94,20 @@ class NeatoNode(object):
     
         # main loop of driver
         r = rospy.Rate(5)
+        iter_count = 0
         rospy.sleep(4)
         #self.robot.requestScan()
         scan.header.stamp = rospy.Time.now()
         last_motor_time = rospy.Time.now()
         total_dth = 0.0
         while not rospy.is_shutdown():
+            #print "spinning"
+            iter_count += 1
+            if self.cmd_to_send != None:
+                self.robot.send_command(self.cmd_to_send)
+                self.cmd_to_send = None
+
+            t_start = time.time()
             self.robot.requestScan()
             new_stamp = rospy.Time.now()
             delta_t = (new_stamp - scan.header.stamp).to_sec()
@@ -111,15 +115,16 @@ class NeatoNode(object):
             if delta_t-0.2 > 0.1:
                 print "Iteration took longer than expected (should be 0.2) ", delta_t
             (scan.ranges, scan.intensities) = self.robot.getScanRanges()
-
             # repeat last measurement to simulate -pi to pi (instead of -pi to pi - pi/180)
-            # This is important in order to adhere to ROS conventions regarding laser scanners
             scan.ranges.append(scan.ranges[0])
             scan.intensities.append(scan.intensities[0])
+            #print 'Got scan ranges %f' % (time.time() - t_start)
 
             # get motor encoder values
             curr_motor_time = rospy.Time.now()
+            t_start = time.time()
             try:
+                start_t = rospy.Time.now()
                 left, right, left_speed, right_speed = self.robot.getMotors()
                 delta_t = (rospy.Time.now() - scan.header.stamp).to_sec()
                 # now update position information
@@ -137,10 +142,6 @@ class NeatoNode(object):
                 dth = (d_right-d_left)/(BASE_WIDTH/1000.0)
                 total_dth += dth
 
-                x_init = self.x
-                y_init = self.y
-                th_init = self.th
-
                 x = cos(dth)*dx
                 y = -sin(dth)*dx
 
@@ -148,6 +149,7 @@ class NeatoNode(object):
                 self.y += sin(self.th)*x + cos(self.th)*y
                 self.th += dth
 
+                # prepare tf from base_link to odom
                 quaternion = Quaternion()
                 quaternion.z = sin(self.th/2.0)
                 quaternion.w = cos(self.th/2.0)
@@ -166,26 +168,28 @@ class NeatoNode(object):
                                         0, 0, 0, 0, 0, 10**5]
                 odom.twist.twist.linear.x = dx/dt
                 odom.twist.twist.angular.z = dth/dt
-                self.odomBroadcaster.sendTransform( (self.x, self.y, 0), (quaternion.x, quaternion.y, quaternion.z, quaternion.w), curr_motor_time, "base_link", "odom" )
+                #self.odomBroadcaster.sendTransform( (self.x, self.y, 0), (quaternion.x, quaternion.y, quaternion.z, quaternion.w), curr_motor_time, "base_link", "odom" )
                 self.odomPub.publish(odom)
+                #print 'Got motors %f' % (time.time() - t_start)
             except Exception as err:
                 print "my error is " + str(err)
-            self.robot.setMotors(self.cmd_vel[0],
-                                 self.cmd_vel[1],
-                                 max(abs(self.cmd_vel[0]),abs(self.cmd_vel[1])))
-
+            t_start = time.time()           
+            self.robot.setMotors(self.cmd_vel[0], self.cmd_vel[1], max(abs(self.cmd_vel[0]),abs(self.cmd_vel[1])))
             try:
                 bump_sensors = self.robot.getDigitalSensors()
                 self.bumpPub.publish(Bump(leftFront=bump_sensors[0],leftSide=bump_sensors[1],rightFront=bump_sensors[2],rightSide=bump_sensors[3]))
             except:
                 print "failed to get bump sensors!"
+            # # send updated movement commands
+            #print 'Set motors %f' % (time.time() - t_start)
 
+            # publish everything
+            #print "publishing scan!"
             self.scanPub.publish(scan)
             # wait, then do it again
             r.sleep()
 
     def cmdVelCb(self,req):
-        # Simple odometry model
         x = req.linear.x * 1000
         th = req.angular.z * (BASE_WIDTH/2) 
         k = max(abs(x-th),abs(x+th))
@@ -198,3 +202,4 @@ class NeatoNode(object):
 if __name__ == "__main__":
     robot = NeatoNode()
     robot.spin()
+

@@ -1,0 +1,34 @@
+<launch>
+  <arg name="use_sim_time" value="false"/>
+  <arg name="host"/>
+  <arg name="host_up"/>
+  <arg name="receive_port" default="5000"/>
+  <arg name="receive_port_up" default="5001"/>
+  <arg name="width" default="640"/>
+  <arg name="height" default="480"/>
+  <arg name="fps" default="30"/>
+
+  <include file="$(find neato_node)/launch/bringup_minimal.launch">
+	<arg name="host" value="$(arg host)"/>
+  </include>
+  <include file="$(find gscam)/examples/raspi_nodelet_udp.launch">
+	 <arg name="host" value="$(arg host)"/>
+   <arg name="receive_port" value="$(arg receive_port)"/>
+   <arg name="width" value="$(arg width)"/>
+   <arg name="height" value="$(arg height)"/>
+   <arg name="fps" value="$(arg fps)"/>
+  </include>
+  <group ns="cam_up">
+    <include file="$(find gscam)/examples/raspi_nodelet_udp.launch">
+     <arg name="host" value="$(arg host_up)"/>
+     <arg name="receive_port" value="$(arg receive_port_up)"/>
+     <arg name="width" value="$(arg width)"/>
+     <arg name="height" value="$(arg height)"/>
+     <arg name="fps" value="$(arg fps)"/>
+    </include>
+    <include file="$(find ar_pose)/launch/ar_pose_multi.launch"/>
+    <node name="star_center_positioning_node" pkg="my_pf" type="star_center_position_revised.py">
+      <param name="is_flipped" value="True"/>
+    </node>
+  </group>
+</launch>
