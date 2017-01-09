@@ -191,13 +191,11 @@ class xv11():
         """ Ask neato for an array of scan reads. """
         # for now we will rely on the pi to request scans, we will just fetch the sensor packet here
         #self.port.send("getldsscan\r\n")
-        print "requesting scan!!"
         while True:
             self.sensor_packet, _ = self.sensor_sock.recvfrom(65536)
             if 'Ambiguous Cmd' in self.sensor_packet:
                 print "got a bad packet"
             else:
-                print "got a sensor packet of", len(self.sensor_packet)
                 break
         self.sensor_lines = self.sensor_packet.splitlines()
 
@@ -216,11 +214,6 @@ class xv11():
                 intensities[i] = 0.0
         # filter out ranges that are too long or too short
         for i in range(len(ranges)):
-            if ranges[i] > 5.0:
-                pass
-	       	    # assume no detection is free space
-                #ranges[i] = 2.0
-                #intensities[i] = 50
             if ranges[i] < .2 or ranges[i] > 5.0:
                 ranges[i] = 0.0
                 intensities[i] = 0.0
