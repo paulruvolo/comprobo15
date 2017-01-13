@@ -183,13 +183,15 @@ class NeatoNode(object):
                 bump_sensors = self.robot.getDigitalSensors()
                 self.bumpPub.publish(Bump(leftFront=bump_sensors[0],leftSide=bump_sensors[1],rightFront=bump_sensors[2],rightSide=bump_sensors[3]))
             except:
-                print "failed to get bump sensors!"
+                pass
+                #print "failed to get bump sensors!"
 
             try:
                 accelerometer = self.robot.getAccel()
                 self.accelPub.publish(Accel(accelXInG=accelerometer[2],accelYInG=accelerometer[3],accelZInG=accelerometer[4]))
             except Exception as err:
-                print "failed to get accelerometer!", err
+                pass
+                #print "failed to get accelerometer!", err
 
             if len(scan.ranges):
                 self.scanPub.publish(scan)
