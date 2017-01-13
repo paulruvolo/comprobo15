@@ -157,7 +157,7 @@ class xv11():
 
         self.sensor_sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM) # UDP
         self.sensor_sock.bind((UDP_IP, UDP_PORT))
-        self.sensor_lines = []
+        self.sensor_sock.settimeout(.02)
         print "CONNECTED!"
 
         #self.port.settimeout(10)
@@ -180,24 +180,23 @@ class xv11():
     def setTestMode(self, value):
         """ Turn test mode on/off. """
 
-        self.port.send("testmode " + value + '\r\n')
+        self.port.send("testmode " + value + '\n')
         print "SETTING TEST MODE TO",value
 
     def setLDS(self, value):
-        print "setldsrotation " + value + "\r\n"
-        self.port.send("setldsrotation " + value + '\r\n')
+        print "setldsrotation " + value + '\n'
+        self.port.send("setldsrotation " + value + '\n')
 
     def requestScan(self):
         """ Ask neato for an array of scan reads. """
         # for now we will rely on the pi to request scans, we will just fetch the sensor packet here
         #self.port.send("getldsscan\r\n")
-        while True:
+        try:
             self.sensor_packet, _ = self.sensor_sock.recvfrom(65536)
-            if 'Ambiguous Cmd' in self.sensor_packet:
-                print "got a bad packet"
-            else:
-                break
-        self.sensor_lines = self.sensor_packet.splitlines()
+            neato_outputs = self.sensor_packet.split(chr(26))
+            self.response_dict = {resp[:resp.find('\r')]: resp for resp in neato_outputs}
+        except socket.timeout:
+            self.response_dict = {}
 
     @staticmethod
     def filter_outliers(ranges,intensities):
@@ -223,81 +222,49 @@ class xv11():
         """ Read values of a scan -- call requestScan first! """
         ranges = list()
         intensities = list()
+        if 'getldsscan' not in self.response_dict:
+            print 'missing scan ranges'
+            return ([],[])
 
         try:
             remainder = ""
             found_start_token = False
-            while not(found_start_token):
-                while True:
-                    try:
-                        line, self.sensor_lines = self.sensor_lines[0], self.sensor_lines[1:]
-                        line += '\n'
-                        break
-                    except:
-                        pass
-                if line.find('Unknown Cmd') != -1:
-                    # something weird happened bail
+            line = self.response_dict['getldsscan']
+
+            if line.find('Unknown Cmd') != -1:
+                # something weird happened. bail.
+                pass
+            listing = [s.strip() for s in line.splitlines()]
+
+            for i in range(len(listing)):
+                entry = listing[i]
+                if entry.startswith('AngleInDegrees') and (len(listing)-1>i or line.endswith('\n')):
+                    listing = listing[i+1:]
+                    found_start_token = True
+                    break
+
+            for i in range(len(listing)):
+                entry = listing[i]
+                vals = entry.split(',')
+                try:
+                    a = int(vals[0])
+                    r = int(vals[1])
+                    intensity = int(vals[2])
+                    if len(ranges) > a:
+                        # got a value we thought we lost
+                        ranges[a] = r/1000.0
+                        intensities[a] = intensity
+                    else:
+                        ranges.append(r/1000.0)
+                        intensities.append(intensity)
+                except:
+                    ranges.append(0.0)
+                    intensities.append(0.0)
+                    # should not happen too much... debug if it does
                     pass
-                line = remainder + line
-                remainder = ""
-                listing = [s.strip() for s in line.splitlines()]
-                if not(line.endswith('\n')) and len(listing):
-                    remainder = listing[-1]
-                    listing = listing[0:-1]
+                if len(ranges) >= 360:
+                    return xv11.filter_outliers(ranges, intensities)
 
-                for i in range(len(listing)):
-                    entry = listing[i]
-                    if entry.startswith('AngleInDegrees') and (len(listing)-1>i or line.endswith('\n')):
-                        listing = listing[i+1:]
-                        found_start_token = True
-                        break
-            if len(listing) and not(line.endswith('\n')):
-                remainder = listing[-1]
-                listing = listing[0:-1]
-            else:
-                remainder = ""
-
-            while True:
-                for i in range(len(listing)):
-                    entry = listing[i]
-                    vals = entry.split(',')
-                    try:
-                        a = int(vals[0])
-                        r = int(vals[1])
-                        intensity = int(vals[2])
-                        if len(ranges) > a:
-                            # got a value we thought we lost
-                            ranges[a] = r/1000.0
-                            intensities[a] = intensity
-                        else:
-                            ranges.append(r/1000.0)
-                            intensities.append(intensity)
-                    except:
-                        ranges.append(0.0)
-                        intensities.append(0.0)
-                        # should not happen too much... debug if it does
-                        pass
-                    if len(ranges) >= 360:
-                        return xv11.filter_outliers(ranges, intensities)
-
-                listing = []
-                while True:
-                    try:
-                        line, self.sensor_lines = self.sensor_lines[0], self.sensor_lines[1:]
-                        line += '\n'
-                        break
-                    except:
-                        pass
-                listing = [s.strip() for s in line.splitlines()]
-                if len(listing) > 0:
-                    listing[0] = remainder + listing[0]
-                    remainder = ""
-
-                if not(line.endswith('\n')) and len(listing):
-                    remainder = listing[-1]
-                    listing = listing[0:-1]
-                else:
-                    remainder = ""
             return xv11.filter_outliers(ranges, intensities)
         except:
             return ([],[])        
@@ -312,7 +279,7 @@ class xv11():
         #the zero is sent. This effectively causes the robot to stop instantly.
         if (int(l) == 0 and int(r) == 0 and int(s) == 0):
             if not(self.stop_state):
-                self.port.send("setmotor 1 1 1\r\n")
+                self.port.send("setmotor 1 1 1\n")
                 self.stop_state = True
             else:
                 pass
@@ -320,79 +287,39 @@ class xv11():
         else:
             self.stop_state = False
             self.last_cmd = (l,r,s)
-            self.port.send("setmotor "+str(int(l))+" "+str(int(r))+" "+str(int(s))+"\r\n")
-        self.flush_socket()
-
-    def flush_socket(self):
-        # for now just return
-        return
-        self.port.setblocking(False)
-        #read_sockets = select.select([self.port], [], [])
-        while True:
-            try:
-                line = self.port.recv(1024)
-                if len(line) == 0:
-                    break
-            except:
-                break
-            #read_sockets = select.select([self.port], [], [])
-        self.port.setblocking(True)
+            self.port.send("setmotor "+str(int(l))+" "+str(int(r))+" "+str(int(s))+"\n")
 
     def getMotors(self):
         """ Update values for motors in the self.state dictionary.
             Returns current left, right encoder values. """
         #self.port.send("getmotors\r\n")
         # for now we will rely on the raspberry pi to request motors by itself
-        while True:
-            try:
-                line, self.sensor_lines = self.sensor_lines[0], self.sensor_lines[1:]
-                line += '\n'                
-                break
-            except Exception as inst:
-                print "UNEXPECTED! ERROR 0 " + str(inst)
-        if line.find('Unknown Cmd') != -1:
-            # something weird happened bail
-            print "UNEXPECTED! ERROR 1"
-            raise IOError('Get Motors Failed')
-        listing = [s.strip() for s in line.splitlines()]
-        if not(line.endswith('\n')) and len(listing):
-            remainder = listing[-1]
-            listing = listing[0:-1]
-        else:
-            remainder = ""
-        found_start_token = False
+        if 'getmotors' in self.response_dict:
+            line = self.response_dict['getmotors']
 
-        while len(listing) < 14 or not found_start_token:
-            if not found_start_token:
-                for i,l in enumerate(listing):
-                    if l.startswith('Parameter,Value'):
-                        found_start_token = True
-                        listing = listing[i+1:]
-                        break
-            if len(listing) >= 14:
-                break
-            try:
-                line, self.sensor_lines = self.sensor_lines[0], self.sensor_lines[1:]
-                line += '\n'
-                line = remainder + line
-#                break
-            except:
-                print "UNEXPECTED! ERROR 2"
-                pass
-            remainder = ""
-            listing += [s.strip() for s in line.splitlines()]
-            if not(line.endswith('\n')) and len(listing):
-                remainder = listing[-1]
-                listing = listing[0:-1]
-            else:
-                remainder = ""
-        for i in range(len(listing)):
-            try:
-                values = listing[i].split(',')
-                self.state[values[0]] = int(values[1])
-            except Exception as inst:
-                pass
-        self.flush_socket()
+            if line.find('Unknown Cmd') != -1:
+                # something weird happened bail
+                raise IOError('Get Motors Failed')
+            listing = [s.strip() for s in line.splitlines()]
+            found_start_token = False
+
+            while len(listing) < 14 or not found_start_token:
+                if not found_start_token:
+                    for i,l in enumerate(listing):
+                        if l.startswith('Parameter,Value'):
+                            found_start_token = True
+                            listing = listing[i+1:]
+                            break
+                if len(listing) >= 14:
+                    break
+            for i in range(len(listing)):
+                try:
+                    values = listing[i].split(',')
+                    self.state[values[0]] = int(values[1])
+                except Exception as inst:
+                    pass
+        else:
+            print "failed to get odometry information"
         return [self.state["LeftWheel_PositionInMM"],self.state["RightWheel_PositionInMM"],self.state["LeftWheel_Speed"],self.state["RightWheel_Speed"]]
 
     def getAccel(self):
@@ -400,57 +327,34 @@ class xv11():
             Returns current left, right encoder values. """
         #self.port.flushInput()
         #self.port.send("getaccel\r\n")
+        if 'getaccel' in self.response_dict:
+            line = self.response_dict['getaccel']
+        
+            if line.find('Unknown Cmd') != -1:
+                # something weird happened bail
+                raise IOError('Get Accel Failed')
+            listing = [s.strip() for s in line.splitlines()]
+            found_start_token = False
 
-        while True:
-            try:
-                line, self.sensor_lines = self.sensor_lines[0], self.sensor_lines[1:]
-                line += '\n'
-                break
-            except Exception as inst:
-                print "UNEXPECTED! ERROR 0 " + str(inst)
-        if line.find('Unknown Cmd') != -1:
-            # something weird happened bail
-            print "UNEXPECTED! ERROR 1"
-            raise IOError('Get Accel Failed')
-        listing = [s.strip() for s in line.splitlines()]
-        if not(line.endswith('\n')) and len(listing):
-            remainder = listing[-1]
-            listing = listing[0:-1]
+            while len(listing) < 6 or not found_start_token:
+                if not found_start_token:
+                    for i,l in enumerate(listing):
+                        if l.startswith('Label,Value'):
+                            found_start_token = True
+                            listing = listing[i+1:]
+                            break
+                if len(listing) >= 6:
+                    break
+
+            for i in range(len(listing)):
+                try:
+                    values = listing[i].split(',')
+                    self.state[values[0]] = float(values[1])
+                except Exception as inst:
+                    pass
         else:
-            remainder = ""
-        found_start_token = False
+            print "missing accelerometer values"
 
-        while len(listing) < 6 or not found_start_token:
-            if not found_start_token:
-                for i,l in enumerate(listing):
-                    if l.startswith('Label,Value'):
-                        found_start_token = True
-                        listing = listing[i+1:]
-                        break
-            if len(listing) >= 6:
-                break
-            try:
-                line, self.sensor_lines = self.sensor_lines[0], self.sensor_lines[1:]
-                line += '\n'
-                line = remainder + line
-#                break
-            except:
-                print "UNEXPECTED! ERROR 2"
-                pass
-            remainder = ""
-            listing += [s.strip() for s in line.splitlines()]
-            if not(line.endswith('\n')) and len(listing):
-                remainder = listing[-1]
-                listing = listing[0:-1]
-            else:
-                remainder = ""
-        for i in range(len(listing)):
-            try:
-                values = listing[i].split(',')
-                self.state[values[0]] = float(values[1])
-            except Exception as inst:
-                pass
-        self.flush_socket()
         return [self.state["PitchInDegrees"],
                 self.state["RollInDegrees"],
                 self.state["XInG"],
@@ -480,36 +384,22 @@ class xv11():
         """ Update values for digital sensors in the self.state dictionary. """
         #self.port.send("getdigitalsensors\r\n")
         # for now we will let the raspberry pi request the digital sensors by itself
-        line, self.sensor_lines = self.sensor_lines[0], self.sensor_lines[1:]
-        line += '\n'
-        if line.find('Unknown Cmd') != -1:
-            # something weird happened bail
-            raise IOError('Get Digital Sensors Failed')
+        if 'getdigitalsensors' in self.response_dict:
+            line = self.response_dict['getdigitalsensors']
 
-        listing = [s.strip() for s in line.splitlines()]
-        if not(line.endswith('\n')) and len(listing):
-            remainder = listing[-1]
-            listing = listing[0:-1]
+            if line.find('Unknown Cmd') != -1:
+                # something weird happened bail
+                raise IOError('Get Digital Sensors Failed')
+
+            listing = [s.strip() for s in line.splitlines()]
+            for i in range(len(listing)-1):
+                try:
+                    values = listing[i+1].split(',')
+                    self.state[values[0]] = int(values[1])
+                except:
+                    pass
         else:
-            remainder = ""
-
-        while (len(listing) < 11):
-                line, self.sensor_lines = self.sensor_lines[0], self.sensor_lines[1:]
-                line += '\n'
-                line = remainder + line
-                remainder = ""
-                listing += [s.strip() for s in line.splitlines()]
-                if not(line.endswith('\n')) and len(listing):
-                    remainder = listing[-1]
-                    listing = listing[0:-1]
-                else:
-                    remainder = ""
-        for i in range(len(listing)-1):
-            try:
-                values = listing[i+1].split(',')
-                self.state[values[0]] = int(values[1])
-            except:
-                pass
+            print "didn't get digital sensors"
         return [self.state['LFRONTBIT'],self.state['LSIDEBIT'],self.state['RFRONTBIT'],self.state['RSIDEBIT']]
 
     def getCharger(self):

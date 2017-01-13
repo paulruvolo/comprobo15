@@ -99,7 +99,7 @@ class NeatoNode(object):
         odom = Odometry(header=rospy.Header(frame_id="odom"), child_frame_id='base_link')
     
         # main loop of driver
-        r = rospy.Rate(20)
+        r = rospy.Rate(10)
         rospy.sleep(4)
         #self.robot.requestScan()
         scan.header.stamp = rospy.Time.now()
