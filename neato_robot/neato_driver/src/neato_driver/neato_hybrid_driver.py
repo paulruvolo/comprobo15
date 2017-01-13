@@ -282,8 +282,6 @@ class xv11():
         #the zero is sent. This effectively causes the robot to stop instantly.
         if (int(l) == 0 and int(r) == 0 and int(s) == 0):
             if not(self.stop_state):
-                print "setting motors in stop state"
-
                 self.port.send("setmotor 1 1 1\n")
                 self.stop_state = True
                 self.last_cmd = (0.0, 0.0, 0.0)
