@@ -111,14 +111,16 @@ class NeatoNode(object):
             delta_t = (new_stamp - scan.header.stamp).to_sec()
             scan.header.stamp = new_stamp
 
-            if True or delta_t-0.2 > 0.1:
-                print "Iteration took longer than expected (should be 0.2) ", delta_t
             (scan.ranges, scan.intensities) = self.robot.getScanRanges()
 
             # repeat last measurement to simulate -pi to pi (instead of -pi to pi - pi/180)
             # This is important in order to adhere to ROS conventions regarding laser scanners
-            scan.ranges.append(scan.ranges[0])
-            scan.intensities.append(scan.intensities[0])
+            if len(scan.ranges):
+                scan.ranges.append(scan.ranges[0])
+                scan.intensities.append(scan.intensities[0])
+
+            if delta_t-0.2 > 0.1:
+                print "Iteration took longer than expected (should be 0.2) ", delta_t
 
             # get motor encoder values
             curr_motor_time = rospy.Time.now()
@@ -189,8 +191,8 @@ class NeatoNode(object):
             except Exception as err:
                 print "failed to get accelerometer!", err
 
-
-            self.scanPub.publish(scan)
+            if len(scan.ranges):
+                self.scanPub.publish(scan)
             # wait, then do it again
             r.sleep()
 
