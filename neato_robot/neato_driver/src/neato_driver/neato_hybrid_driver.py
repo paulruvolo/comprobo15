@@ -223,7 +223,7 @@ class xv11():
         ranges = list()
         intensities = list()
         if 'getldsscan' not in self.response_dict:
-            print 'missing scan ranges'
+            #print 'missing scan ranges'
             return ([],[])
 
         try:
@@ -269,6 +269,9 @@ class xv11():
         except:
             return ([],[])        
         
+    def resend_last_motor_command(self):
+        if self.last_cmd:
+            self.setMotors(self.last_cmd[0], self.last_cmd[1], self.last_cmd[2])
 
     def setMotors(self, l, r, s):
         """ Set motors, distance left & right + speed """
@@ -279,8 +282,11 @@ class xv11():
         #the zero is sent. This effectively causes the robot to stop instantly.
         if (int(l) == 0 and int(r) == 0 and int(s) == 0):
             if not(self.stop_state):
+                print "setting motors in stop state"
+
                 self.port.send("setmotor 1 1 1\n")
                 self.stop_state = True
+                self.last_cmd = (0.0, 0.0, 0.0)
             else:
                 pass
                 #self.port.send("setmotor 0 0 0\r\n")
@@ -319,7 +325,8 @@ class xv11():
                 except Exception as inst:
                     pass
         else:
-            print "failed to get odometry information"
+            pass
+#            print "failed to get odometry information"
         return [self.state["LeftWheel_PositionInMM"],self.state["RightWheel_PositionInMM"],self.state["LeftWheel_Speed"],self.state["RightWheel_Speed"]]
 
     def getAccel(self):
@@ -353,7 +360,8 @@ class xv11():
                 except Exception as inst:
                     pass
         else:
-            print "missing accelerometer values"
+            pass
+           # print "missing accelerometer values"
 
         return [self.state["PitchInDegrees"],
                 self.state["RollInDegrees"],
@@ -399,7 +407,8 @@ class xv11():
                 except:
                     pass
         else:
-            print "didn't get digital sensors"
+            pass
+           # print "didn't get digital sensors"
         return [self.state['LFRONTBIT'],self.state['LSIDEBIT'],self.state['RFRONTBIT'],self.state['RSIDEBIT']]
 
     def getCharger(self):

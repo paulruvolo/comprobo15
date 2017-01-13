@@ -53,8 +53,8 @@ from geometry_msgs.msg import Twist
 from nav_msgs.msg import Odometry
 from neato_node.msg import Bump, Accel
 from tf.broadcaster import TransformBroadcaster
-
 import numpy as np
+import threading
 
 from neato_driver.neato_hybrid_driver import xv11, BASE_WIDTH, MAX_SPEED
 
@@ -77,7 +77,8 @@ class NeatoNode(object):
 
         self.odomBroadcaster = TransformBroadcaster()
 
-        self.cmd_vel = [0,0]
+        self.cmd_vel = None
+        self.cmd_vel_lock = threading.Lock()
 
     def spin(self):        
         encoders = [0,0]
@@ -104,6 +105,8 @@ class NeatoNode(object):
         #self.robot.requestScan()
         scan.header.stamp = rospy.Time.now()
         last_motor_time = rospy.Time.now()
+        last_set_motor_time = rospy.Time.now()
+
         total_dth = 0.0
         while not rospy.is_shutdown():
             self.robot.requestScan()
@@ -175,9 +178,15 @@ class NeatoNode(object):
                 self.odomPub.publish(odom)
             except Exception as err:
                 print "my error is " + str(err)
-            self.robot.setMotors(self.cmd_vel[0],
-                                 self.cmd_vel[1],
-                                 max(abs(self.cmd_vel[0]),abs(self.cmd_vel[1])))
+            with self.cmd_vel_lock:
+                if self.cmd_vel:
+                    self.robot.setMotors(self.cmd_vel[0],
+                                         self.cmd_vel[1],
+                                         max(abs(self.cmd_vel[0]),abs(self.cmd_vel[1])))
+                    self.cmd_vel = None
+                elif rospy.Time.now() - last_set_motor_time > rospy.Duration(.2):
+                    self.robot.resend_last_motor_command()
+                    last_set_motor_time = rospy.Time.now()
 
             try:
                 bump_sensors = self.robot.getDigitalSensors()
@@ -204,7 +213,8 @@ class NeatoNode(object):
         # sending commands higher than max speed will fail
         if k > MAX_SPEED:
             x = x*MAX_SPEED/k; th = th*MAX_SPEED/k
-        self.cmd_vel = [ int(x-th) , int(x+th) ]
+        with self.cmd_vel_lock:
+            self.cmd_vel = [ int(x-th) , int(x+th) ]
         #print self.cmd_vel, "SENDING THIS VEL"
 
 if __name__ == "__main__":
